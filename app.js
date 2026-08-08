@@ -692,12 +692,45 @@ function docLink(path, label) {
   return `<a href="#" class="doclink" data-path="${esc(path)}">${ficon(name)} ${esc(name)}</a>`;
 }
 
-// Open a document Luna referred to. Files in the cloud library open for real;
-// for the archive we hold the extracted text, since the originals stay on the PC.
-async function openDocPath(path) {
-  if (path.startsWith("John 2026-27/")) {
-    return openViewer({ orig_name: path.split("/").pop(), storage_path: path, bucket: "reference" });
+// Open a document Luna referred to. The real file wins whenever a cloud copy
+// exists (working folder or Command Centre uploads); extracted text is the
+// fallback for archive originals that live only on the office PC.
+async function walkReference(prefix) {
+  const { data } = await sb.storage.from("reference").list(prefix, { limit: 1000 });
+  let out = [];
+  for (const e of data || []) {
+    if (!e.id) {
+      if (e.name === "_app") continue;      // the app's own page, not a document
+      out = out.concat(await walkReference(prefix ? `${prefix}/${e.name}` : e.name));
+    } else {
+      out.push({ orig_name: e.name, storage_path: prefix ? `${prefix}/${e.name}` : e.name });
+    }
   }
+  return out;
+}
+
+let refIndexCache = null;
+async function findInReference(name) {
+  if (!refIndexCache) refIndexCache = await walkReference("");
+  const lower = name.toLowerCase();
+  const stem = lower.replace(/\.[a-z0-9]+$/, "");
+  return refIndexCache.find((f) => f.orig_name.toLowerCase() === lower) ??
+    refIndexCache.find((f) => f.orig_name.toLowerCase().replace(/\.[a-z0-9]+$/, "") === stem);
+}
+
+async function openDocPath(path) {
+  const name = path.split("/").pop();
+  if (path.startsWith("John 2026-27/") || path.startsWith("cc/")) {
+    return openViewer({ orig_name: name, storage_path: path, bucket: "reference" });
+  }
+
+  const { data: cc } = await sb.from("cc_docs")
+    .select("name,storage_path").ilike("name", name).limit(1);
+  if (cc && cc.length) {
+    return openViewer({ orig_name: cc[0].name, storage_path: cc[0].storage_path, bucket: "reference" });
+  }
+  const hit = await findInReference(name);
+  if (hit) return openViewer({ ...hit, bucket: "reference" });
 
   let { data } = await sb.from("archive_docs")
     .select("name,year,category,body,path").eq("path", path).limit(1);
