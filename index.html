@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CliffordOS</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏫</text></svg>">
+</head>
+<body>
+
+<!-- ======== LOGIN ======== -->
+<div id="login" class="login hidden">
+  <div class="login-card">
+    <div class="login-logo">🏫</div>
+    <h1>CliffordOS</h1>
+    <p class="login-sub">School operations &amp; documents</p>
+    <form id="login-form" autocomplete="on">
+      <label>Username
+        <input id="login-user" type="text" autocomplete="username" required autofocus>
+      </label>
+      <label>Password
+        <input id="login-pass" type="password" autocomplete="current-password" required>
+      </label>
+      <div id="login-err" class="login-err"></div>
+      <button type="submit" id="login-btn">Sign in</button>
+    </form>
+    <p class="login-note">You stay signed in on this device until you log out.</p>
+  </div>
+</div>
+
+<!-- ======== APP SHELL ======== -->
+<div id="shell" class="shell hidden">
+  <nav class="side">
+    <div class="side-brand">🏫 <span>CliffordOS</span></div>
+    <a href="#/dashboard" data-nav="dashboard">🏠 Dashboard</a>
+    <a href="#/control"   data-nav="control">🧭 Control Centre</a>
+    <a href="#/chat"      data-nav="chat">💬 Chat <span id="badge-chat" class="badge hidden"></span></a>
+    <a href="#/files"     data-nav="files">📁 My Files</a>
+    <a href="#/reference" data-nav="reference">📚 Reference</a>
+    <a href="#/inbox"     data-nav="inbox">📥 Inbox <span id="badge-inbox" class="badge hidden"></span></a>
+    <a href="#/sent"      data-nav="sent">📤 Sent</a>
+    <a href="#/archive"   data-nav="archive">🗄️ Archive</a>
+    <a href="#/luna"      data-nav="luna">🌙 Luna</a>
+    <a href="#/admin"     data-nav="admin" id="nav-admin" class="hidden">⚙️ Admin</a>
+    <div class="side-foot">
+      <div id="who" class="who"></div>
+      <button id="logout" class="linkbtn">Log out</button>
+    </div>
+  </nav>
+  <main id="main" class="main"></main>
+</div>
+
+<!-- ======== VIEWER ======== -->
+<div id="viewer" class="viewer hidden">
+  <div class="viewer-box">
+    <div class="viewer-head">
+      <span id="viewer-title"></span>
+      <span class="viewer-actions">
+        <button id="viewer-dl" class="btn small">⬇ Download</button>
+        <button id="viewer-close" class="btn small ghost">✕ Close</button>
+      </span>
+    </div>
+    <div id="viewer-body" class="viewer-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="vendor/supabase.js"></script>
+<script src="vendor/mammoth.js"></script>
+<script src="vendor/xlsx.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
