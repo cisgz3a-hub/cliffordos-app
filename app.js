@@ -45,6 +45,10 @@ function toast(msg, isErr) {
 }
 
 // ---------- auth ----------
+// The embedded Control Centre borrows this app's login and identity.
+window.sb = sb;
+window.state = state;
+
 async function boot() {
   const { data: { session } } = await sb.auth.getSession();
   if (session) await enterApp(session.user);
@@ -437,20 +441,8 @@ async function pageControl() {
   $("#main").innerHTML = "";
   const frame = document.createElement("iframe");
   frame.className = "control-frame";
-  // Our own generated page — full same-origin iframe, and the session is handed
-  // over explicitly (storage access from inside srcdoc frames proved flaky).
-  frame.onload = async () => {
-    try {
-      const w = frame.contentWindow;
-      const { data } = await sb.auth.getSession();
-      if (w && w.CS && data.session) {
-        await w.CS.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
-        });
-      }
-    } catch (err) { console.error("control session handoff", err); }
-  };
+  // Our own generated page, full same-origin. It borrows this app's login for
+  // every request (see the builder), so no session ever lives inside the frame.
   frame.srcdoc = controlHtml;
   $("#main").appendChild(frame);
 }
@@ -552,11 +544,34 @@ async function markChatRead() {
 // ----- Luna -----
 // The conversation lives in memory for now; each turn posts the recent history
 // to the luna-chat function, which does the searching and answers.
-const lunaChat = [];
+let lunaChat = [];
+let lunaConversationId = null;
+let lunaHistoryLoaded = false;
 
-function pageLuna() {
+// Luna remembers: reopen the latest saved conversation and carry on.
+async function loadLunaHistory() {
+  if (lunaHistoryLoaded) return;
+  lunaHistoryLoaded = true;
+  const { data: convs } = await sb.from("luna_conversations")
+    .select("id").order("updated_at", { ascending: false }).limit(1);
+  if (!convs || !convs.length) return;
+  lunaConversationId = convs[0].id;
+  const { data: msgs } = await sb.from("luna_messages")
+    .select("role,content").eq("conversation_id", lunaConversationId)
+    .order("ts", { ascending: true }).limit(40);
+  lunaChat = (msgs || []).map((m) => ({
+    role: m.role,
+    content: m.content?.text ?? "",
+    tools: m.content?.tools ?? [],
+    docs: m.content?.docs ?? [],
+  }));
+}
+
+async function pageLuna() {
+  await loadLunaHistory();
   $("#main").innerHTML = `
-    <div class="page-head"><h2>🌙 Luna</h2></div>
+    <div class="page-head"><h2>🌙 Luna</h2>
+      ${lunaChat.length ? `<button class="btn small ghost" id="luna-new">✨ New conversation</button>` : ""}</div>
     <div class="card" id="luna-log">
       ${lunaChat.length ? "" : `<div class="empty" style="text-align:left">
         Ask me about anything in the archive — 14,866 documents, going back years.<br><br>
@@ -573,6 +588,8 @@ function pageLuna() {
     </form>`;
 
   lunaChat.forEach(paintLunaMsg);
+  const newBtn = $("#luna-new");
+  if (newBtn) newBtn.onclick = () => { lunaChat = []; lunaConversationId = null; pageLuna(); };
   $("#luna-form").onsubmit = (e) => { e.preventDefault(); sendToLuna($("#luna-input").value); };
   document.querySelectorAll(".luna-eg").forEach((b) => {
     b.onclick = () => sendToLuna(b.textContent);
@@ -742,7 +759,10 @@ async function sendToLuna(text) {
         apikey: window.CLIFFORD.anon,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ messages: lunaChat.filter((m) => m.content !== "…thinking") }),
+      body: JSON.stringify({
+        messages: lunaChat.filter((m) => m.content !== "…thinking"),
+        conversation_id: lunaConversationId,
+      }),
     });
     const data = await res.json();
     thinking.remove();
@@ -750,6 +770,7 @@ async function sendToLuna(text) {
     if (!res.ok || data.error) {
       paintLunaMsg({ role: "assistant", content: data.error || "Luna could not answer just now." });
     } else {
+      if (data.conversation_id) lunaConversationId = data.conversation_id;
       const msg = {
         role: "assistant",
         content: data.reply,

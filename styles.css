@@ -159,7 +159,8 @@ a { color: var(--accent); }
 }
 .doclink:hover { border-color: var(--accent); text-decoration: underline; }
 .luna-docs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 0 4px; }
-.control-frame { width: 100%; height: calc(100vh - 40px); border: 0; border-radius: 12px; background: #fff; }
+/* The Control Centre takes the whole screen — it is a destination, not a widget. */
+.control-frame { position: fixed; inset: 0; z-index: 40; width: 100%; height: 100%; border: 0; background: #fff; }
 tr.unread .fname { font-weight: 800; }
 tr.unread { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 .luna-msg.user .doclink { background: transparent; color: #fff; border-color: rgba(255,255,255,.5); }
