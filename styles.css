@@ -206,6 +206,7 @@ a { color: var(--accent); }
 .msg.first .msg-bubble { border-top-left-radius: 6px; }
 .msg.mine.first .msg-bubble { border-top-left-radius: 16px; border-top-right-radius: 6px; }
 .msg-time { font-size: 10.5px; opacity: .65; margin-left: 8px; white-space: nowrap; }
+.read-note { font-size: 11px; color: var(--accent); font-weight: 700; margin: 3px 4px 0; }
 .filechip {
   display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin: 2px 0 4px;
   border-radius: 10px; background: rgba(128, 128, 128, .12);

@@ -618,6 +618,11 @@ async function renderChat() {
     return;
   }
 
+  // The newest of my messages they've seen gets an explicit "Read" note.
+  const lastRead = chatWith
+    ? [...msgs].reverse().find((m) => m.from_user === me && m.read_at)
+    : null;
+
   let html = "", lastDay = "", lastFrom = null;
   msgs.forEach((m) => {
     const day = dayLabel(m.ts);
@@ -638,6 +643,10 @@ async function renderChat() {
           ${m.body ? `<span>${esc(m.body)}</span>` : ""}
           <span class="msg-time">${time}${mine && chatWith ? (m.read_at ? " ✓✓" : " ✓") : ""}</span>
         </div>
+        ${m === lastRead
+          ? `<div class="read-note">✓✓ Read ${new Date(m.read_at).toLocaleTimeString(undefined,
+              { hour: "2-digit", minute: "2-digit" })}</div>`
+          : ""}
       </div>`;
   });
   log.innerHTML = html;
