@@ -637,6 +637,9 @@ function lunaFormat(text, docs) {
 // paraphrases a filename closely enough that the text match above misses it.
 function lunaDocChips(docs) {
   if (!docs || !docs.length) return "";
+  // The same filename often exists under several year folders — one chip is enough.
+  const seen = new Set();
+  docs = docs.filter((d) => !seen.has(d.name) && seen.add(d.name));
   const top = docs.slice(0, 6);
   return `<div class="luna-docs">${top.map((d) => docLink(d.path, d.name)).join("")}` +
     (docs.length > top.length
