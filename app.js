@@ -437,36 +437,52 @@ async function pageControl() {
   $("#main").innerHTML = "";
   const frame = document.createElement("iframe");
   frame.className = "control-frame";
-  frame.sandbox = "allow-scripts allow-same-origin allow-modals allow-popups allow-downloads";
+  // Our own generated page — full same-origin iframe, and the session is handed
+  // over explicitly (storage access from inside srcdoc frames proved flaky).
+  frame.onload = async () => {
+    try {
+      const w = frame.contentWindow;
+      const { data } = await sb.auth.getSession();
+      if (w && w.CS && data.session) {
+        await w.CS.auth.setSession({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        });
+      }
+    } catch (err) { console.error("control session handoff", err); }
+  };
   frame.srcdoc = controlHtml;
   $("#main").appendChild(frame);
 }
 
 // ----- Chat (instant messages between the three of you) -----
-let chatWith = null;          // profile we're talking to
+let chatWith = null;          // profile we're talking to; null = the group thread
+let chatPeople = [];
 let chatChannel = null;
 
 async function pageChat() {
   const { data: people } = await sb.from("profiles")
     .select("id,display_name,username").neq("id", state.user.id).order("display_name");
-  if (!chatWith && people?.length) chatWith = people[0];
+  chatPeople = people || [];
 
+  const who = chatWith ? chatWith.display_name : "everyone";
   $("#main").innerHTML = `
     <div class="page-head"><h2>💬 Chat</h2>
       <span class="tabs" style="margin:0">
-        ${(people || []).map((p) => `
+        <button data-pid="" class="${chatWith ? "" : "active"}">👥 Everyone</button>
+        ${chatPeople.map((p) => `
           <button data-pid="${p.id}" class="${chatWith && p.id === chatWith.id ? "active" : ""}">
             ${esc(p.display_name)}</button>`).join("")}
       </span>
     </div>
     <div class="card" id="chat-log"><div class="empty">Loading…</div></div>
     <form id="chat-form" class="luna-bar">
-      <input id="chat-input" placeholder="Message ${esc(chatWith ? chatWith.display_name : "")}…" autocomplete="off">
+      <input id="chat-input" placeholder="Message ${esc(who)}…" autocomplete="off">
       <button class="btn" type="submit">Send</button>
     </form>`;
 
   document.querySelectorAll("[data-pid]").forEach((b) => {
-    b.onclick = () => { chatWith = people.find((p) => p.id === b.dataset.pid); pageChat(); };
+    b.onclick = () => { chatWith = chatPeople.find((p) => p.id === b.dataset.pid) ?? null; pageChat(); };
   });
   $("#chat-form").onsubmit = (e) => { e.preventDefault(); sendChat(); };
 
@@ -476,24 +492,31 @@ async function pageChat() {
   $("#chat-input").focus();
 }
 
+function chatName(id) {
+  if (id === state.user.id) return "You";
+  return chatPeople.find((p) => p.id === id)?.display_name ?? "?";
+}
+
 async function renderChat() {
-  if (!chatWith) return;
   const me = state.user.id;
-  const { data: msgs } = await sb.from("messages")
-    .select("*")
-    .or(`and(from_user.eq.${me},to_user.eq.${chatWith.id}),and(from_user.eq.${chatWith.id},to_user.eq.${me})`)
-    .order("ts", { ascending: true })
-    .limit(200);
+  let q = sb.from("messages").select("*").order("ts", { ascending: true }).limit(200);
+  q = chatWith
+    ? q.or(`and(from_user.eq.${me},to_user.eq.${chatWith.id}),and(from_user.eq.${chatWith.id},to_user.eq.${me})`)
+    : q.is("to_user", null);
+  const { data: msgs } = await q;
   const log = $("#chat-log");
   if (!log) return;
   if (!msgs || !msgs.length) {
-    log.innerHTML = `<div class="empty">No messages with ${esc(chatWith.display_name)} yet — say hello.</div>`;
+    log.innerHTML = `<div class="empty">${chatWith
+      ? `No messages with ${esc(chatWith.display_name)} yet — say hello.`
+      : "Nothing in the group chat yet — everyone sees what you write here."}</div>`;
     return;
   }
   log.innerHTML = msgs.map((m) => `
     <div class="luna-msg ${m.from_user === me ? "user" : "assistant"}">
-      <div class="bubble">${esc(m.body)}</div>
-      <div class="luna-tools">${fmtDate(m.ts)}${m.from_user === me && m.read_at ? " · ✓ read" : ""}</div>
+      <div class="bubble">${chatWith || m.from_user === me ? "" :
+        `<b>${esc(chatName(m.from_user))}</b><br>`}${esc(m.body)}</div>
+      <div class="luna-tools">${fmtDate(m.ts)}${chatWith && m.from_user === me && m.read_at ? " · ✓ read" : ""}</div>
     </div>`).join("");
   log.scrollTop = log.scrollHeight;
 }
@@ -501,10 +524,10 @@ async function renderChat() {
 async function sendChat() {
   const box = $("#chat-input");
   const body = box.value.trim();
-  if (!body || !chatWith) return;
+  if (!body) return;
   box.value = "";
   const { error } = await sb.from("messages")
-    .insert({ from_user: state.user.id, to_user: chatWith.id, body });
+    .insert({ from_user: state.user.id, to_user: chatWith ? chatWith.id : null, body });
   if (error) { toast("Could not send", true); box.value = body; return; }
   renderChat();
 }
@@ -519,7 +542,7 @@ function subscribeChat() {
 }
 
 async function markChatRead() {
-  if (!chatWith) return;
+  if (!chatWith) return;   // the group thread has no per-person read receipts
   await sb.from("messages")
     .update({ read_at: new Date().toISOString() })
     .eq("to_user", state.user.id).eq("from_user", chatWith.id).is("read_at", null);
