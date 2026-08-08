@@ -308,6 +308,49 @@ async function purgeFile(file) {
   renderFileList();
 }
 
+// ----- change your own password -----
+$("#pw-change").onclick = () => {
+  const wrap = document.createElement("div");
+  wrap.className = "viewer";
+  wrap.innerHTML = `
+    <div class="viewer-box" style="max-width:400px;height:auto">
+      <div class="viewer-head"><span>Change your password</span>
+        <span class="viewer-actions"><button class="btn small ghost" id="pw-cancel">✕</button></span></div>
+      <div class="viewer-body" style="padding:18px 22px">
+        <label style="display:block;margin-bottom:12px"><b>New password</b> (at least 8 characters)
+          <input type="password" id="pw-new" style="width:100%;margin-top:6px" autocomplete="new-password">
+        </label>
+        <label style="display:block;margin-bottom:14px"><b>Type it again</b>
+          <input type="password" id="pw-again" style="width:100%;margin-top:6px" autocomplete="new-password">
+        </label>
+        <div id="pw-err" class="login-err"></div>
+        <button class="btn" id="pw-save" style="width:100%">Save new password</button>
+        <p class="muted" style="font-size:12px;margin:10px 0 0">
+          You stay signed in here. Use the new password next time you log in on any device.</p>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector("#pw-cancel").onclick = close;
+  wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
+  wrap.querySelector("#pw-save").onclick = async () => {
+    const a = wrap.querySelector("#pw-new").value;
+    const b = wrap.querySelector("#pw-again").value;
+    const err = wrap.querySelector("#pw-err");
+    if (a.length < 8) { err.textContent = "Use at least 8 characters."; return; }
+    if (a !== b) { err.textContent = "The two boxes don't match."; return; }
+    wrap.querySelector("#pw-save").disabled = true;
+    const { error } = await sb.auth.updateUser({ password: a });
+    if (error) {
+      err.textContent = error.message;
+      wrap.querySelector("#pw-save").disabled = false;
+      return;
+    }
+    close();
+    toast("Password changed ✓");
+  };
+};
+
 // ----- sending files + inbox / sent -----
 async function openSendDialog(file) {
   const { data: people } = await sb.from("profiles")
@@ -452,36 +495,90 @@ let chatWith = null;          // profile we're talking to; null = the group thre
 let chatPeople = [];
 let chatChannel = null;
 
+function initials(name) {
+  return name.split(/[\s(]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+}
+
 async function pageChat() {
   const { data: people } = await sb.from("profiles")
     .select("id,display_name,username").neq("id", state.user.id).order("display_name");
   chatPeople = people || [];
+  const me = state.user.id;
 
-  const who = chatWith ? chatWith.display_name : "everyone";
-  $("#main").innerHTML = `
-    <div class="page-head"><h2>💬 Chat</h2>
-      <span class="tabs" style="margin:0">
-        <button data-pid="" class="${chatWith ? "" : "active"}">👥 Everyone</button>
-        ${chatPeople.map((p) => `
-          <button data-pid="${p.id}" class="${chatWith && p.id === chatWith.id ? "active" : ""}">
-            ${esc(p.display_name)}</button>`).join("")}
-      </span>
-    </div>
-    <div class="card" id="chat-log"><div class="empty">Loading…</div></div>
-    <form id="chat-form" class="luna-bar">
-      <input id="chat-input" placeholder="Message ${esc(who)}…" autocomplete="off">
-      <button class="btn" type="submit">Send</button>
-    </form>`;
-
-  document.querySelectorAll("[data-pid]").forEach((b) => {
-    b.onclick = () => { chatWith = chatPeople.find((p) => p.id === b.dataset.pid) ?? null; pageChat(); };
+  // Sidebar needs a last-line + unread count per conversation.
+  const { data: recent } = await sb.from("messages")
+    .select("from_user,to_user,body,file_name,ts,read_at")
+    .order("ts", { ascending: false }).limit(200);
+  const convs = [{ id: null, name: "Everyone", group: true }]
+    .concat(chatPeople.map((p) => ({ id: p.id, name: p.display_name, group: false })));
+  convs.forEach((c) => {
+    const msgs = (recent || []).filter((m) => c.group
+      ? m.to_user === null
+      : (m.from_user === c.id && m.to_user === me) || (m.from_user === me && m.to_user === c.id));
+    const last = msgs[0];
+    c.last = last ? (last.file_name ? `📎 ${last.file_name}` : last.body) : "";
+    c.when = last ? last.ts : null;
+    c.unread = c.group ? 0
+      : msgs.filter((m) => m.from_user === c.id && m.to_user === me && !m.read_at).length;
   });
+
+  const active = (c) => (chatWith ? chatWith.id === c.id : c.id === null);
+  $("#main").innerHTML = `
+    <div class="chat-app">
+      <aside class="chat-side">
+        <div class="chat-side-head">Conversations</div>
+        ${convs.map((c) => `
+          <div class="conv ${active(c) ? "active" : ""}" data-cid="${c.id ?? ""}">
+            <span class="avatar ${c.group ? "grp" : ""}">${c.group ? "👥" : esc(initials(c.name))}</span>
+            <span class="conv-main">
+              <span class="conv-name">${esc(c.name)}</span>
+              <span class="conv-last">${esc((c.last || "No messages yet").slice(0, 34))}</span>
+            </span>
+            <span class="conv-meta">
+              ${c.when ? `<span class="conv-when">${fmtDate(c.when).split(" ")[1] ?? ""}</span>` : ""}
+              ${c.unread ? `<span class="badge">${c.unread}</span>` : ""}
+            </span>
+          </div>`).join("")}
+      </aside>
+      <section class="chat-pane">
+        <div class="chat-head">
+          <span class="avatar ${chatWith ? "" : "grp"}">${chatWith ? esc(initials(chatWith.display_name)) : "👥"}</span>
+          <b>${esc(chatWith ? chatWith.display_name : "Everyone")}</b>
+          <span class="muted">${chatWith ? "private conversation" : "all three of you"}</span>
+        </div>
+        <div id="chat-log"><div class="empty">Loading…</div></div>
+        <form id="chat-form" class="chat-composer">
+          <button type="button" class="btn ghost" id="chat-attach" title="Send a file">📎</button>
+          <input type="file" id="chat-file" class="hidden">
+          <textarea id="chat-input" rows="1"
+            placeholder="Message ${esc(chatWith ? chatWith.display_name : "everyone")}…  (Enter to send)"></textarea>
+          <button class="btn" id="chat-send" type="submit">➤</button>
+        </form>
+      </section>
+    </div>`;
+
+  document.querySelectorAll(".conv").forEach((el) => {
+    el.onclick = () => {
+      chatWith = chatPeople.find((p) => p.id === el.dataset.cid) ?? null;
+      pageChat();
+    };
+  });
+  const input = $("#chat-input");
+  input.oninput = () => {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 130) + "px";
+  };
+  input.onkeydown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+  };
   $("#chat-form").onsubmit = (e) => { e.preventDefault(); sendChat(); };
+  $("#chat-attach").onclick = () => $("#chat-file").click();
+  $("#chat-file").onchange = (e) => sendChatFile(e.target.files[0]);
 
   await renderChat();
   subscribeChat();
   markChatRead();
-  $("#chat-input").focus();
+  input.focus();
 }
 
 function chatName(id) {
@@ -489,9 +586,25 @@ function chatName(id) {
   return chatPeople.find((p) => p.id === id)?.display_name ?? "?";
 }
 
+function dayLabel(ts) {
+  const d = new Date(ts);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const that = new Date(d); that.setHours(0, 0, 0, 0);
+  const diff = (today - that) / 86400000;
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+}
+
+function chatFileChip(m) {
+  return `<a href="#" class="filechip" data-fpath="${esc(m.file_path)}" data-fname="${esc(m.file_name)}">
+    ${ficon(m.file_name)} <span>${esc(m.file_name)}</span>
+    <small>${fmtSize(m.file_size)}</small></a>`;
+}
+
 async function renderChat() {
   const me = state.user.id;
-  let q = sb.from("messages").select("*").order("ts", { ascending: true }).limit(200);
+  let q = sb.from("messages").select("*").order("ts", { ascending: true }).limit(300);
   q = chatWith
     ? q.or(`and(from_user.eq.${me},to_user.eq.${chatWith.id}),and(from_user.eq.${chatWith.id},to_user.eq.${me})`)
     : q.is("to_user", null);
@@ -504,13 +617,43 @@ async function renderChat() {
       : "Nothing in the group chat yet — everyone sees what you write here."}</div>`;
     return;
   }
-  log.innerHTML = msgs.map((m) => `
-    <div class="luna-msg ${m.from_user === me ? "user" : "assistant"}">
-      <div class="bubble">${chatWith || m.from_user === me ? "" :
-        `<b>${esc(chatName(m.from_user))}</b><br>`}${esc(m.body)}</div>
-      <div class="luna-tools">${fmtDate(m.ts)}${chatWith && m.from_user === me && m.read_at ? " · ✓ read" : ""}</div>
-    </div>`).join("");
+
+  let html = "", lastDay = "", lastFrom = null;
+  msgs.forEach((m) => {
+    const day = dayLabel(m.ts);
+    if (day !== lastDay) {
+      html += `<div class="day-sep"><span>${esc(day)}</span></div>`;
+      lastDay = day; lastFrom = null;
+    }
+    const mine = m.from_user === me;
+    const first = m.from_user !== lastFrom;
+    lastFrom = m.from_user;
+    const time = new Date(m.ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    html += `
+      <div class="msg ${mine ? "mine" : ""} ${first ? "first" : ""}">
+        ${!mine && !chatWith && first
+          ? `<div class="msg-sender">${esc(chatName(m.from_user))}</div>` : ""}
+        <div class="msg-bubble">
+          ${m.file_path ? chatFileChip(m) : ""}
+          ${m.body ? `<span>${esc(m.body)}</span>` : ""}
+          <span class="msg-time">${time}${mine && chatWith ? (m.read_at ? " ✓✓" : " ✓") : ""}</span>
+        </div>
+      </div>`;
+  });
+  log.innerHTML = html;
   log.scrollTop = log.scrollHeight;
+
+  log.querySelectorAll(".filechip").forEach((a) => {
+    a.onclick = async (e) => {
+      e.preventDefault();
+      const { data, error } = await sb.storage.from("chat").download(a.dataset.fpath);
+      if (error) return toast("Could not open the file", true);
+      const url = URL.createObjectURL(data);
+      const dl = document.createElement("a");
+      dl.href = url; dl.download = a.dataset.fname;
+      document.body.appendChild(dl); dl.click(); dl.remove();
+    };
+  });
 }
 
 async function sendChat() {
@@ -518,9 +661,29 @@ async function sendChat() {
   const body = box.value.trim();
   if (!body) return;
   box.value = "";
+  box.style.height = "auto";
   const { error } = await sb.from("messages")
     .insert({ from_user: state.user.id, to_user: chatWith ? chatWith.id : null, body });
   if (error) { toast("Could not send", true); box.value = body; return; }
+  renderChat();
+}
+
+async function sendChatFile(f) {
+  if (!f) return;
+  if (f.size > 50 * 1048576) return toast(`${f.name}: over the 50 MB limit`, true);
+  toast(`Sending ${f.name}…`);
+  const safe = f.name.replace(/[^\w.\- ()一-鿿]/g, "_");
+  const path = `${state.user.id}/${crypto.randomUUID()}_${safe}`;
+  const { error: upErr } = await sb.storage.from("chat")
+    .upload(path, f, { contentType: f.type || undefined });
+  if (upErr) return toast("Upload failed", true);
+  const { error } = await sb.from("messages").insert({
+    from_user: state.user.id,
+    to_user: chatWith ? chatWith.id : null,
+    body: "",
+    file_path: path, file_name: f.name, file_size: f.size,
+  });
+  if (error) return toast("Could not send the file", true);
   renderChat();
 }
 
